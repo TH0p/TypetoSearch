@@ -149,6 +149,7 @@
 
   // --- Injeção de Frame Script por-aba para capturar o clique na barra visual da extensão ---
   const SEARCH_CLICK_MSG = "SpeedDial:VisualSearchClick";
+  const SET_OFFSET_MSG = "SpeedDial:SetToolbarOffset";
   const FRAME_SCRIPT_SRC = `
     (function () {
       if (this.__speedDialVisualClickLoaded) return;
@@ -167,6 +168,14 @@
           sendAsyncMessage("${SEARCH_CLICK_MSG}", {});
         } catch (err) {}
       }, true);
+      addMessageListener("${SET_OFFSET_MSG}", function (msg) {
+        try {
+          if (content && content.document && content.document.documentElement) {
+            const px = msg.data && typeof msg.data.px === "number" ? msg.data.px : 0;
+            content.document.documentElement.style.setProperty("--toolbar-safe-top", px + "px");
+          }
+        } catch (err) {}
+      });
     }).call(this);
   `;
   const FRAME_SCRIPT_URL =
@@ -179,6 +188,66 @@
       log("Erro ao injetar frame script na aba:", err);
     }
   }
+
+  // Mede quanto da toolbar/urlbar do Zen está de fato visível cobrindo o topo
+  // da página (seja pelo comportamento normal do Compact Mode, seja pelo bug
+  // dele ficando "grudado" em cima do conteúdo) e avisa a página da Speed
+  // Dial pra reservar esse espaço, em vez de depender do Zen empurrar o
+  // conteúdo sozinho.
+  function getToolbarOverlayHeight() {
+    try {
+      const navbar =
+        document.getElementById("zen-appcontent-navbar-container") ||
+        document.getElementById("nav-bar");
+      if (!navbar) return 0;
+      const rect = navbar.getBoundingClientRect();
+      return Math.max(0, Math.round(rect.height));
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  function sendToolbarOffsetToTab(tab, px) {
+    try {
+      tab.linkedBrowser.messageManager.sendAsyncMessage(SET_OFFSET_MSG, { px });
+    } catch (err) {}
+  }
+
+  function syncToolbarOffsetForActiveTab() {
+    try {
+      const tab = gBrowser.selectedTab;
+      if (!tab || !isHomeUri(tab.linkedBrowser?.currentURI)) return;
+      sendToolbarOffsetToTab(tab, getToolbarOverlayHeight());
+    } catch (err) {}
+  }
+
+  function syncToolbarOffsetWithRetries() {
+    syncToolbarOffsetForActiveTab();
+    setTimeout(syncToolbarOffsetForActiveTab, 50);
+    setTimeout(syncToolbarOffsetForActiveTab, 200);
+    setTimeout(syncToolbarOffsetForActiveTab, 500);
+    setTimeout(syncToolbarOffsetForActiveTab, 1000);
+  }
+
+  function setupToolbarResizeObserver() {
+    try {
+      const navbar =
+        document.getElementById("zen-appcontent-navbar-container") ||
+        document.getElementById("nav-bar");
+      if (!navbar) {
+        setTimeout(setupToolbarResizeObserver, 500);
+        return;
+      }
+      const ro = new ResizeObserver(() => {
+        syncToolbarOffsetForActiveTab();
+      });
+      ro.observe(navbar);
+    } catch (err) {
+      log("Erro ao configurar ResizeObserver da toolbar:", err);
+    }
+  }
+
+  setupToolbarResizeObserver();
 
   function setupVisualSearchRedirect() {
     try {
@@ -288,6 +357,7 @@
         applyHomeTabAppearanceWithRetries(e.target);
         if (isHomeUri(e.target?.linkedBrowser?.currentURI)) {
           collapseUrlBarWithRetries();
+          syncToolbarOffsetWithRetries();
         }
       });
 
@@ -296,6 +366,7 @@
         applyHomeTabAppearanceWithRetries(tab);
         if (isHomeUri(tab?.linkedBrowser?.currentURI)) {
           collapseUrlBarWithRetries();
+          syncToolbarOffsetWithRetries();
         }
       });
 
@@ -308,6 +379,7 @@
               applyHomeTabAppearanceWithRetries(tab);
               if (isHomeUri(location) && tab === gBrowser.selectedTab) {
                 collapseUrlBarWithRetries();
+                syncToolbarOffsetWithRetries();
               }
             }
           } catch (err) {}
