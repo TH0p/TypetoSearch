@@ -29,58 +29,6 @@
     return null;
   })();
 
-  // Simula um clique real e físico dentro da extensão para obrigar o Zen a recolher a barra
-  function simulateContentClick(tab) {
-    try {
-      if (!isHomePage()) return;
-      const browser = tab?.linkedBrowser || gBrowser.selectedBrowser;
-      if (!browser) return;
-
-      // 1. Pede ao processo da página para clicar no meio da tela
-      browser.messageManager.sendAsyncMessage("SpeedDial:SimulateClick", {});
-
-      // 2. Dispara eventos de ponteiro no container da aba no processo pai
-      browser.focus();
-      const rect = browser.getBoundingClientRect();
-      const clickX = rect.left + rect.width / 2;
-      const clickY = rect.top + rect.height / 2;
-
-      browser.dispatchEvent(
-        new PointerEvent("pointerdown", {
-          bubbles: true,
-          cancelable: true,
-          clientX: clickX,
-          clientY: clickY,
-          pointerType: "mouse"
-        })
-      );
-      browser.dispatchEvent(
-        new MouseEvent("mousedown", {
-          bubbles: true,
-          cancelable: true,
-          clientX: clickX,
-          clientY: clickY,
-          button: 0
-        })
-      );
-      browser.dispatchEvent(
-        new MouseEvent("mouseup", {
-          bubbles: true,
-          cancelable: true,
-          clientX: clickX,
-          clientY: clickY,
-          button: 0
-        })
-      );
-
-      if (window.gURLBar && gURLBar.view && gURLBar.view.isOpen) {
-        gURLBar.view.close();
-      }
-    } catch (err) {
-      log("Erro ao simular clique:", err);
-    }
-  }
-
   function readClipboardTextSync() {
     if (!XPCOM) return "";
     const flavors = ["text/plain", "text/unicode"];
@@ -117,8 +65,63 @@
     requestAnimationFrame(caretToEnd);
   }
 
+  function collapseUrlBar() {
+    try {
+      if (gURLBar.view && gURLBar.view.isOpen) {
+        gURLBar.view.close();
+      }
+    } catch (err) {}
+    try {
+      if (typeof gURLBar.handleRevert === "function") {
+        gURLBar.handleRevert();
+      }
+    } catch (err) {}
+    try {
+      gURLBar.blur();
+    } catch (err) {}
+    try {
+      if (typeof gURLBar.endLayoutExtend === "function") {
+        gURLBar.endLayoutExtend();
+      }
+    } catch (err) {}
+    try {
+      const urlbarEl = document.getElementById("urlbar");
+      if (urlbarEl) {
+        urlbarEl.removeAttribute("breakout-extend");
+        urlbarEl.removeAttribute("breakout-extend-animate");
+      }
+    } catch (err) {}
+    // Tentativa extra: forçar o Compact Mode do próprio Zen a recolher.
+    // O Zen mostra a toolbar/urlbar enquanto algum elemento tiver o atributo
+    // zen-has-hover="true" (normalmente setado pelo hover do mouse). Removemos
+    // esse atributo e simulamos o mouse saindo da navbar, já que isso não é
+    // uma API oficial e pode variar entre versões do Zen.
+    try {
+      document.querySelectorAll('[zen-has-hover="true"]').forEach((el) => {
+        el.removeAttribute("zen-has-hover");
+      });
+    } catch (err) {}
+    try {
+      const navbar =
+        document.getElementById("zen-appcontent-navbar-container") ||
+        document.getElementById("nav-bar");
+      if (navbar) {
+        navbar.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+        navbar.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+      }
+    } catch (err) {}
+  }
+
+  function collapseUrlBarWithRetries() {
+    collapseUrlBar();
+    setTimeout(collapseUrlBar, 50);
+    setTimeout(collapseUrlBar, 200);
+    setTimeout(collapseUrlBar, 500);
+    setTimeout(collapseUrlBar, 1000);
+  }
+
   function activateUrlBar() {
-    log("ativando urlbar");
+    log("ativando urlbar (via search, sem alterar texto)");
     try {
       gURLBar.search(gURLBar.value || "");
     } catch (err) {
@@ -144,25 +147,12 @@
     }
   }
 
-  // --- Frame Script por-aba com listener para simular clique no DOM real ---
+  // --- Injeção de Frame Script por-aba para capturar o clique na barra visual da extensão ---
   const SEARCH_CLICK_MSG = "SpeedDial:VisualSearchClick";
   const FRAME_SCRIPT_SRC = `
     (function () {
       if (this.__speedDialVisualClickLoaded) return;
       this.__speedDialVisualClickLoaded = true;
-
-      addMessageListener("SpeedDial:SimulateClick", function() {
-        try {
-          const target = content.document.body || content.document.documentElement;
-          if (!target) return;
-          target.focus();
-          const evtOpts = { bubbles: true, cancelable: true, view: content };
-          target.dispatchEvent(new MouseEvent("mousedown", evtOpts));
-          target.dispatchEvent(new MouseEvent("mouseup", evtOpts));
-          target.dispatchEvent(new MouseEvent("click", evtOpts));
-        } catch (e) {}
-      });
-
       addEventListener("mousedown", function (e) {
         try {
           const t = e.target;
@@ -172,6 +162,7 @@
             t.id === "searchForm" ||
             (t.closest && t.closest("#searchForm"));
           if (!isSearchBox) return;
+          // Impede o <input readonly> de roubar o foco antes da urlbar ser ativada
           e.preventDefault();
           sendAsyncMessage("${SEARCH_CLICK_MSG}", {});
         } catch (err) {}
@@ -270,19 +261,14 @@
           gBrowser.setIcon(tab, iconUrl);
         }
       }
-
-      if (tab === gBrowser.selectedTab) {
-        simulateContentClick(tab);
-      }
     } catch (err) {}
   }
 
   function applyHomeTabAppearanceWithRetries(tab) {
     applyHomeTabAppearance(tab);
-    setTimeout(() => applyHomeTabAppearance(tab), 50);
-    setTimeout(() => applyHomeTabAppearance(tab), 150);
-    setTimeout(() => applyHomeTabAppearance(tab), 350);
-    setTimeout(() => applyHomeTabAppearance(tab), 700);
+    setTimeout(() => applyHomeTabAppearance(tab), 200);
+    setTimeout(() => applyHomeTabAppearance(tab), 800);
+    setTimeout(() => applyHomeTabAppearance(tab), 2000);
   }
 
   function setupTabAppearanceOverride() {
@@ -300,10 +286,17 @@
 
       gBrowser.tabContainer.addEventListener("TabOpen", (e) => {
         applyHomeTabAppearanceWithRetries(e.target);
+        if (isHomeUri(e.target?.linkedBrowser?.currentURI)) {
+          collapseUrlBarWithRetries();
+        }
       });
 
       gBrowser.tabContainer.addEventListener("TabSelect", (e) => {
-        applyHomeTabAppearanceWithRetries(e.target);
+        const tab = e.target;
+        applyHomeTabAppearanceWithRetries(tab);
+        if (isHomeUri(tab?.linkedBrowser?.currentURI)) {
+          collapseUrlBarWithRetries();
+        }
       });
 
       const progressListener = {
@@ -313,6 +306,9 @@
             const tab = gBrowser.getTabForBrowser(webProgress.browser);
             if (tab) {
               applyHomeTabAppearanceWithRetries(tab);
+              if (isHomeUri(location) && tab === gBrowser.selectedTab) {
+                collapseUrlBarWithRetries();
+              }
             }
           } catch (err) {}
         },
