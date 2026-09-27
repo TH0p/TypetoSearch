@@ -29,49 +29,55 @@
     return null;
   })();
 
-  // Força o recolhimento nativo do Zen Compact Mode usando Escape sintético e APIs do Zen
-  function collapseUrlBarCleanly() {
+  // Simula um clique real e físico dentro da extensão para obrigar o Zen a recolher a barra
+  function simulateContentClick(tab) {
     try {
       if (!isHomePage()) return;
+      const browser = tab?.linkedBrowser || gBrowser.selectedBrowser;
+      if (!browser) return;
 
-      // 1. Tenta acionar métodos nativos de recolhimento do Zen Browser
-      if (window.zenCompactMode && typeof window.zenCompactMode.hideNavBar === "function") {
-        window.zenCompactMode.hideNavBar();
-      }
+      // 1. Pede ao processo da página para clicar no meio da tela
+      browser.messageManager.sendAsyncMessage("SpeedDial:SimulateClick", {});
 
-      // 2. Sintetiza um Escape na urlbar: no Zen, Escape recolhe a barra compacta e fecha a view
-      if (window.gURLBar) {
-        const target = gURLBar.inputField || gURLBar;
-        target.dispatchEvent(
-          new KeyboardEvent("keydown", {
-            key: "Escape",
-            code: "Escape",
-            keyCode: 27,
-            which: 27,
-            bubbles: true,
-            cancelable: true,
-          })
-        );
+      // 2. Dispara eventos de ponteiro no container da aba no processo pai
+      browser.focus();
+      const rect = browser.getBoundingClientRect();
+      const clickX = rect.left + rect.width / 2;
+      const clickY = rect.top + rect.height / 2;
 
-        if (gURLBar.view && gURLBar.view.isOpen) {
-          gURLBar.view.close();
-        }
-        if (typeof gURLBar.handleRevert === "function") {
-          gURLBar.handleRevert();
-        }
-        gURLBar.blur();
-      }
+      browser.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          bubbles: true,
+          cancelable: true,
+          clientX: clickX,
+          clientY: clickY,
+          pointerType: "mouse"
+        })
+      );
+      browser.dispatchEvent(
+        new MouseEvent("mousedown", {
+          bubbles: true,
+          cancelable: true,
+          clientX: clickX,
+          clientY: clickY,
+          button: 0
+        })
+      );
+      browser.dispatchEvent(
+        new MouseEvent("mouseup", {
+          bubbles: true,
+          cancelable: true,
+          clientX: clickX,
+          clientY: clickY,
+          button: 0
+        })
+      );
 
-      // 3. Devolve imediatamente o foco à página web
-      const activeBrowser = gBrowser?.selectedBrowser;
-      if (activeBrowser) {
-        activeBrowser.focus();
-        if (activeBrowser.contentWindow) {
-          activeBrowser.contentWindow.focus();
-        }
+      if (window.gURLBar && gURLBar.view && gURLBar.view.isOpen) {
+        gURLBar.view.close();
       }
     } catch (err) {
-      log("Erro ao recolher barra:", err);
+      log("Erro ao simular clique:", err);
     }
   }
 
@@ -138,12 +144,25 @@
     }
   }
 
-  // --- Injeção de Frame Script por-aba para capturar o clique na barra visual da extensão ---
+  // --- Frame Script por-aba com listener para simular clique no DOM real ---
   const SEARCH_CLICK_MSG = "SpeedDial:VisualSearchClick";
   const FRAME_SCRIPT_SRC = `
     (function () {
       if (this.__speedDialVisualClickLoaded) return;
       this.__speedDialVisualClickLoaded = true;
+
+      addMessageListener("SpeedDial:SimulateClick", function() {
+        try {
+          const target = content.document.body || content.document.documentElement;
+          if (!target) return;
+          target.focus();
+          const evtOpts = { bubbles: true, cancelable: true, view: content };
+          target.dispatchEvent(new MouseEvent("mousedown", evtOpts));
+          target.dispatchEvent(new MouseEvent("mouseup", evtOpts));
+          target.dispatchEvent(new MouseEvent("click", evtOpts));
+        } catch (e) {}
+      });
+
       addEventListener("mousedown", function (e) {
         try {
           const t = e.target;
@@ -253,18 +272,17 @@
       }
 
       if (tab === gBrowser.selectedTab) {
-        collapseUrlBarCleanly();
+        simulateContentClick(tab);
       }
     } catch (err) {}
   }
 
   function applyHomeTabAppearanceWithRetries(tab) {
     applyHomeTabAppearance(tab);
-    // Ciclo de chamadas curtas e médias para vencer a rotina assíncrona do Zen de focar nova aba
-    requestAnimationFrame(() => applyHomeTabAppearance(tab));
     setTimeout(() => applyHomeTabAppearance(tab), 50);
     setTimeout(() => applyHomeTabAppearance(tab), 150);
     setTimeout(() => applyHomeTabAppearance(tab), 350);
+    setTimeout(() => applyHomeTabAppearance(tab), 700);
   }
 
   function setupTabAppearanceOverride() {
