@@ -90,6 +90,25 @@
         urlbarEl.removeAttribute("breakout-extend");
       }
     } catch (err) {}
+    // Tentativa extra: forçar o Compact Mode do próprio Zen a recolher.
+    // O Zen mostra a toolbar/urlbar enquanto algum elemento tiver o atributo
+    // zen-has-hover="true" (normalmente setado pelo hover do mouse). Removemos
+    // esse atributo e simulamos o mouse saindo da navbar, já que isso não é
+    // uma API oficial e pode variar entre versões do Zen.
+    try {
+      document.querySelectorAll('[zen-has-hover="true"]').forEach((el) => {
+        el.removeAttribute("zen-has-hover");
+      });
+    } catch (err) {}
+    try {
+      const navbar =
+        document.getElementById("zen-appcontent-navbar-container") ||
+        document.getElementById("nav-bar");
+      if (navbar) {
+        navbar.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
+        navbar.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
+      }
+    } catch (err) {}
   }
 
   function collapseUrlBarWithRetries() {
