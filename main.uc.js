@@ -65,61 +65,6 @@
     requestAnimationFrame(caretToEnd);
   }
 
-  function collapseUrlBar() {
-    try {
-      if (gURLBar.view && gURLBar.view.isOpen) {
-        gURLBar.view.close();
-      }
-    } catch (err) {}
-    try {
-      if (typeof gURLBar.handleRevert === "function") {
-        gURLBar.handleRevert();
-      }
-    } catch (err) {}
-    try {
-      gURLBar.blur();
-    } catch (err) {}
-    try {
-      if (typeof gURLBar.endLayoutExtend === "function") {
-        gURLBar.endLayoutExtend();
-      }
-    } catch (err) {}
-    try {
-      const urlbarEl = document.getElementById("urlbar");
-      if (urlbarEl) {
-        urlbarEl.removeAttribute("breakout-extend");
-        urlbarEl.removeAttribute("breakout-extend-animate");
-      }
-    } catch (err) {}
-    // Tentativa extra: forçar o Compact Mode do próprio Zen a recolher.
-    // O Zen mostra a toolbar/urlbar enquanto algum elemento tiver o atributo
-    // zen-has-hover="true" (normalmente setado pelo hover do mouse). Removemos
-    // esse atributo e simulamos o mouse saindo da navbar, já que isso não é
-    // uma API oficial e pode variar entre versões do Zen.
-    try {
-      document.querySelectorAll('[zen-has-hover="true"]').forEach((el) => {
-        el.removeAttribute("zen-has-hover");
-      });
-    } catch (err) {}
-    try {
-      const navbar =
-        document.getElementById("zen-appcontent-navbar-container") ||
-        document.getElementById("nav-bar");
-      if (navbar) {
-        navbar.dispatchEvent(new MouseEvent("mouseleave", { bubbles: true }));
-        navbar.dispatchEvent(new MouseEvent("mouseout", { bubbles: true }));
-      }
-    } catch (err) {}
-  }
-
-  function collapseUrlBarWithRetries() {
-    collapseUrlBar();
-    setTimeout(collapseUrlBar, 50);
-    setTimeout(collapseUrlBar, 200);
-    setTimeout(collapseUrlBar, 500);
-    setTimeout(collapseUrlBar, 1000);
-  }
-
   function activateUrlBar() {
     log("ativando urlbar (via search, sem alterar texto)");
     try {
@@ -149,7 +94,6 @@
 
   // --- Injeção de Frame Script por-aba para capturar o clique na barra visual da extensão ---
   const SEARCH_CLICK_MSG = "SpeedDial:VisualSearchClick";
-  const SET_OFFSET_MSG = "SpeedDial:SetToolbarOffset";
   const FRAME_SCRIPT_SRC = `
     (function () {
       if (this.__speedDialVisualClickLoaded) return;
@@ -168,14 +112,6 @@
           sendAsyncMessage("${SEARCH_CLICK_MSG}", {});
         } catch (err) {}
       }, true);
-      addMessageListener("${SET_OFFSET_MSG}", function (msg) {
-        try {
-          if (content && content.document && content.document.documentElement) {
-            const px = msg.data && typeof msg.data.px === "number" ? msg.data.px : 0;
-            content.document.documentElement.style.setProperty("--toolbar-safe-top", px + "px");
-          }
-        } catch (err) {}
-      });
     }).call(this);
   `;
   const FRAME_SCRIPT_URL =
@@ -188,66 +124,6 @@
       log("Erro ao injetar frame script na aba:", err);
     }
   }
-
-  // Mede quanto da toolbar/urlbar do Zen está de fato visível cobrindo o topo
-  // da página (seja pelo comportamento normal do Compact Mode, seja pelo bug
-  // dele ficando "grudado" em cima do conteúdo) e avisa a página da Speed
-  // Dial pra reservar esse espaço, em vez de depender do Zen empurrar o
-  // conteúdo sozinho.
-  function getToolbarOverlayHeight() {
-    try {
-      const navbar =
-        document.getElementById("zen-appcontent-navbar-container") ||
-        document.getElementById("nav-bar");
-      if (!navbar) return 0;
-      const rect = navbar.getBoundingClientRect();
-      return Math.max(0, Math.round(rect.height));
-    } catch (err) {
-      return 0;
-    }
-  }
-
-  function sendToolbarOffsetToTab(tab, px) {
-    try {
-      tab.linkedBrowser.messageManager.sendAsyncMessage(SET_OFFSET_MSG, { px });
-    } catch (err) {}
-  }
-
-  function syncToolbarOffsetForActiveTab() {
-    try {
-      const tab = gBrowser.selectedTab;
-      if (!tab || !isHomeUri(tab.linkedBrowser?.currentURI)) return;
-      sendToolbarOffsetToTab(tab, getToolbarOverlayHeight());
-    } catch (err) {}
-  }
-
-  function syncToolbarOffsetWithRetries() {
-    syncToolbarOffsetForActiveTab();
-    setTimeout(syncToolbarOffsetForActiveTab, 50);
-    setTimeout(syncToolbarOffsetForActiveTab, 200);
-    setTimeout(syncToolbarOffsetForActiveTab, 500);
-    setTimeout(syncToolbarOffsetForActiveTab, 1000);
-  }
-
-  function setupToolbarResizeObserver() {
-    try {
-      const navbar =
-        document.getElementById("zen-appcontent-navbar-container") ||
-        document.getElementById("nav-bar");
-      if (!navbar) {
-        setTimeout(setupToolbarResizeObserver, 500);
-        return;
-      }
-      const ro = new ResizeObserver(() => {
-        syncToolbarOffsetForActiveTab();
-      });
-      ro.observe(navbar);
-    } catch (err) {
-      log("Erro ao configurar ResizeObserver da toolbar:", err);
-    }
-  }
-
-  setupToolbarResizeObserver();
 
   function setupVisualSearchRedirect() {
     try {
@@ -355,19 +231,6 @@
 
       gBrowser.tabContainer.addEventListener("TabOpen", (e) => {
         applyHomeTabAppearanceWithRetries(e.target);
-        if (isHomeUri(e.target?.linkedBrowser?.currentURI)) {
-          collapseUrlBarWithRetries();
-          syncToolbarOffsetWithRetries();
-        }
-      });
-
-      gBrowser.tabContainer.addEventListener("TabSelect", (e) => {
-        const tab = e.target;
-        applyHomeTabAppearanceWithRetries(tab);
-        if (isHomeUri(tab?.linkedBrowser?.currentURI)) {
-          collapseUrlBarWithRetries();
-          syncToolbarOffsetWithRetries();
-        }
       });
 
       const progressListener = {
@@ -375,13 +238,7 @@
           if (!webProgress.isTopLevel) return;
           try {
             const tab = gBrowser.getTabForBrowser(webProgress.browser);
-            if (tab) {
-              applyHomeTabAppearanceWithRetries(tab);
-              if (isHomeUri(location) && tab === gBrowser.selectedTab) {
-                collapseUrlBarWithRetries();
-                syncToolbarOffsetWithRetries();
-              }
-            }
+            if (tab) applyHomeTabAppearanceWithRetries(tab);
           } catch (err) {}
         },
       };
