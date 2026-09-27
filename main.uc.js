@@ -70,14 +70,34 @@
       if (gURLBar.view && gURLBar.view.isOpen) {
         gURLBar.view.close();
       }
+    } catch (err) {}
+    try {
       if (typeof gURLBar.handleRevert === "function") {
         gURLBar.handleRevert();
       }
+    } catch (err) {}
+    try {
       gURLBar.blur();
-      log("urlbar recolhida");
-    } catch (err) {
-      log("erro ao recolher urlbar:", err);
-    }
+    } catch (err) {}
+    try {
+      if (typeof gURLBar.endLayoutExtend === "function") {
+        gURLBar.endLayoutExtend();
+      }
+    } catch (err) {}
+    try {
+      const urlbarEl = document.getElementById("urlbar");
+      if (urlbarEl && urlbarEl.hasAttribute("breakout-extend")) {
+        urlbarEl.removeAttribute("breakout-extend");
+      }
+    } catch (err) {}
+  }
+
+  function collapseUrlBarWithRetries() {
+    collapseUrlBar();
+    setTimeout(collapseUrlBar, 50);
+    setTimeout(collapseUrlBar, 200);
+    setTimeout(collapseUrlBar, 500);
+    setTimeout(collapseUrlBar, 1000);
   }
 
   function activateUrlBar() {
@@ -246,13 +266,16 @@
 
       gBrowser.tabContainer.addEventListener("TabOpen", (e) => {
         applyHomeTabAppearanceWithRetries(e.target);
+        if (isHomeUri(e.target?.linkedBrowser?.currentURI)) {
+          collapseUrlBarWithRetries();
+        }
       });
 
       gBrowser.tabContainer.addEventListener("TabSelect", (e) => {
         const tab = e.target;
         applyHomeTabAppearanceWithRetries(tab);
         if (isHomeUri(tab?.linkedBrowser?.currentURI)) {
-          collapseUrlBar();
+          collapseUrlBarWithRetries();
         }
       });
 
@@ -264,7 +287,7 @@
             if (tab) {
               applyHomeTabAppearanceWithRetries(tab);
               if (isHomeUri(location) && tab === gBrowser.selectedTab) {
-                collapseUrlBar();
+                collapseUrlBarWithRetries();
               }
             }
           } catch (err) {}
