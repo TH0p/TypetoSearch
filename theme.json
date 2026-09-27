@@ -3,7 +3,7 @@
   "name": "Type to Search",
   "description": "Na página inicial (Speed Dial), qualquer tecla começa uma pesquisa na barra de endereços.",
   "author": "seu-nome",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "homepage": "seu-usuario/type-to-search",
   "scripts": {
     "main.uc.js": {
