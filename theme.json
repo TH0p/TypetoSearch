@@ -2,7 +2,7 @@
   "id": "type-to-search",
   "name": "Type to Search",
   "description": "Na página inicial (Speed Dial), qualquer tecla começa uma pesquisa na barra de endereços.",
-  "author": "seu-nome",
+  "author": "MNL",
   "version": "1.0.0",
   "homepage": "seu-usuario/type-to-search",
   "scripts": {
