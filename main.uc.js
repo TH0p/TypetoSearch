@@ -29,6 +29,27 @@
     return null;
   })();
 
+  function dismissUrlBarIfHomePage(tab) {
+    try {
+      if (tab !== gBrowser.selectedTab) return;
+      const uri = tab?.linkedBrowser?.currentURI;
+      if (!isHomeUri(uri)) return;
+
+      if (window.gURLBar) {
+        if (gURLBar.view && gURLBar.view.isOpen) {
+          gURLBar.view.close();
+        }
+        if (document.activeElement === gURLBar.inputField || document.activeElement === gURLBar) {
+          gURLBar.blur();
+        }
+      }
+
+      if (tab.linkedBrowser) {
+        tab.linkedBrowser.focus();
+      }
+    } catch (err) {}
+  }
+
   function readClipboardTextSync() {
     if (!XPCOM) return "";
     const flavors = ["text/plain", "text/unicode"];
@@ -206,11 +227,14 @@
           gBrowser.setIcon(tab, iconUrl);
         }
       }
+
+      dismissUrlBarIfHomePage(tab);
     } catch (err) {}
   }
 
   function applyHomeTabAppearanceWithRetries(tab) {
     applyHomeTabAppearance(tab);
+    setTimeout(() => applyHomeTabAppearance(tab), 50);
     setTimeout(() => applyHomeTabAppearance(tab), 200);
     setTimeout(() => applyHomeTabAppearance(tab), 800);
     setTimeout(() => applyHomeTabAppearance(tab), 2000);
@@ -230,6 +254,10 @@
       });
 
       gBrowser.tabContainer.addEventListener("TabOpen", (e) => {
+        applyHomeTabAppearanceWithRetries(e.target);
+      });
+
+      gBrowser.tabContainer.addEventListener("TabSelect", (e) => {
         applyHomeTabAppearanceWithRetries(e.target);
       });
 
