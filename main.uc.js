@@ -15,6 +15,9 @@
   const currentUrl = () => gBrowser.selectedBrowser?.currentURI?.spec || "";
   const isHomePage = () => HOME_PREFIXES.some((p) => currentUrl().startsWith(p));
 
+  // Trava para permitir foco na barra de endereços APENAS quando o usuário digitar algo
+  let isUserTyping = false;
+
   const XPCOM = (() => {
     try {
       if (typeof Components !== "undefined" && Components.classes) {
@@ -29,24 +32,66 @@
     return null;
   })();
 
+  function collapseUrlBarHard() {
+    try {
+      if (!window.gURLBar) return;
+
+      if (gURLBar.view && gURLBar.view.isOpen) {
+        gURLBar.view.close();
+      }
+
+      gURLBar.removeAttribute("focused");
+      gURLBar.removeAttribute("open");
+      gURLBar.removeAttribute("breakout-extend");
+
+      const container = document.getElementById("urlbar-container");
+      if (container) {
+        container.removeAttribute("focused");
+        container.removeAttribute("breakout-extend");
+      }
+
+      if (document.activeElement === gURLBar.inputField || document.activeElement === gURLBar) {
+        gURLBar.blur();
+      }
+
+      const activeBrowser = gBrowser.selectedBrowser;
+      if (activeBrowser && document.activeElement !== activeBrowser) {
+        activeBrowser.focus();
+      }
+    } catch (err) {}
+  }
+
+  // Intercepta qualquer tentativa do Zen/Firefox de forçar o foco automático na URLBar
+  function setupUrlbarFocusSuppressor() {
+    if (!window.gURLBar) {
+      setTimeout(setupUrlbarFocusSuppressor, 100);
+      return;
+    }
+
+    const target = gURLBar.inputField || gURLBar;
+    target.addEventListener(
+      "focus",
+      (e) => {
+        if (isHomePage() && !isUserTyping) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          collapseUrlBarHard();
+        }
+      },
+      true
+    );
+  }
+
+  setupUrlbarFocusSuppressor();
+
   function dismissUrlBarIfHomePage(tab) {
     try {
       if (tab !== gBrowser.selectedTab) return;
       const uri = tab?.linkedBrowser?.currentURI;
       if (!isHomeUri(uri)) return;
 
-      if (window.gURLBar) {
-        if (gURLBar.view && gURLBar.view.isOpen) {
-          gURLBar.view.close();
-        }
-        if (document.activeElement === gURLBar.inputField || document.activeElement === gURLBar) {
-          gURLBar.blur();
-        }
-      }
-
-      if (tab.linkedBrowser) {
-        tab.linkedBrowser.focus();
-      }
+      isUserTyping = false;
+      collapseUrlBarHard();
     } catch (err) {}
   }
 
@@ -74,6 +119,7 @@
 
   function pushToUrlBar(text) {
     log("colocando na urlbar:", text);
+    isUserTyping = true;
     try {
       gURLBar.search(text);
     } catch (err) {
@@ -88,6 +134,7 @@
 
   function activateUrlBar() {
     log("ativando urlbar (via search, sem alterar texto)");
+    isUserTyping = true;
     try {
       gURLBar.search(gURLBar.value || "");
     } catch (err) {
@@ -128,7 +175,6 @@
             t.id === "searchForm" ||
             (t.closest && t.closest("#searchForm"));
           if (!isSearchBox) return;
-          // Impede o <input readonly> de roubar o foco antes da urlbar ser ativada
           e.preventDefault();
           sendAsyncMessage("${SEARCH_CLICK_MSG}", {});
         } catch (err) {}
@@ -235,9 +281,9 @@
   function applyHomeTabAppearanceWithRetries(tab) {
     applyHomeTabAppearance(tab);
     setTimeout(() => applyHomeTabAppearance(tab), 50);
-    setTimeout(() => applyHomeTabAppearance(tab), 200);
-    setTimeout(() => applyHomeTabAppearance(tab), 800);
-    setTimeout(() => applyHomeTabAppearance(tab), 2000);
+    setTimeout(() => applyHomeTabAppearance(tab), 150);
+    setTimeout(() => applyHomeTabAppearance(tab), 350);
+    setTimeout(() => applyHomeTabAppearance(tab), 700);
   }
 
   function setupTabAppearanceOverride() {
@@ -254,10 +300,12 @@
       });
 
       gBrowser.tabContainer.addEventListener("TabOpen", (e) => {
+        isUserTyping = false;
         applyHomeTabAppearanceWithRetries(e.target);
       });
 
       gBrowser.tabContainer.addEventListener("TabSelect", (e) => {
+        isUserTyping = false;
         applyHomeTabAppearanceWithRetries(e.target);
       });
 
@@ -266,7 +314,10 @@
           if (!webProgress.isTopLevel) return;
           try {
             const tab = gBrowser.getTabForBrowser(webProgress.browser);
-            if (tab) applyHomeTabAppearanceWithRetries(tab);
+            if (tab) {
+              isUserTyping = false;
+              applyHomeTabAppearanceWithRetries(tab);
+            }
           } catch (err) {}
         },
       };
