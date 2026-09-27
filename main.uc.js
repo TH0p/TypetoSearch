@@ -29,12 +29,30 @@
     return null;
   })();
 
-  // Recolhe a urlbar usando os métodos limpos e nativos do Firefox/Zen
+  // Força o recolhimento nativo do Zen Compact Mode usando Escape sintético e APIs do Zen
   function collapseUrlBarCleanly() {
     try {
       if (!isHomePage()) return;
 
+      // 1. Tenta acionar métodos nativos de recolhimento do Zen Browser
+      if (window.zenCompactMode && typeof window.zenCompactMode.hideNavBar === "function") {
+        window.zenCompactMode.hideNavBar();
+      }
+
+      // 2. Sintetiza um Escape na urlbar: no Zen, Escape recolhe a barra compacta e fecha a view
       if (window.gURLBar) {
+        const target = gURLBar.inputField || gURLBar;
+        target.dispatchEvent(
+          new KeyboardEvent("keydown", {
+            key: "Escape",
+            code: "Escape",
+            keyCode: 27,
+            which: 27,
+            bubbles: true,
+            cancelable: true,
+          })
+        );
+
         if (gURLBar.view && gURLBar.view.isOpen) {
           gURLBar.view.close();
         }
@@ -44,11 +62,17 @@
         gURLBar.blur();
       }
 
+      // 3. Devolve imediatamente o foco à página web
       const activeBrowser = gBrowser?.selectedBrowser;
       if (activeBrowser) {
         activeBrowser.focus();
+        if (activeBrowser.contentWindow) {
+          activeBrowser.contentWindow.focus();
+        }
       }
-    } catch (err) {}
+    } catch (err) {
+      log("Erro ao recolher barra:", err);
+    }
   }
 
   function readClipboardTextSync() {
@@ -236,10 +260,11 @@
 
   function applyHomeTabAppearanceWithRetries(tab) {
     applyHomeTabAppearance(tab);
-    // Janelas de tempo para garantir a saída do foco após as rotinas assíncronas do Zen
-    setTimeout(() => applyHomeTabAppearance(tab), 60);
-    setTimeout(() => applyHomeTabAppearance(tab), 180);
-    setTimeout(() => applyHomeTabAppearance(tab), 400);
+    // Ciclo de chamadas curtas e médias para vencer a rotina assíncrona do Zen de focar nova aba
+    requestAnimationFrame(() => applyHomeTabAppearance(tab));
+    setTimeout(() => applyHomeTabAppearance(tab), 50);
+    setTimeout(() => applyHomeTabAppearance(tab), 150);
+    setTimeout(() => applyHomeTabAppearance(tab), 350);
   }
 
   function setupTabAppearanceOverride() {
